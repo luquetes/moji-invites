@@ -100,18 +100,35 @@ export interface EventContent {
   gallery: { src: string; alt: string }[];
 }
 
+/** Snapshot of invitation content shown at /i/[slug] when published. */
+export interface EventRevision {
+  slug: string;
+  modules: ModuleState[];
+  content: EventContent;
+  paletteOverride?: Partial<Palette>;
+}
+
 export interface InviteEvent {
   id: string;
+  /** Draft slug — edited in the studio; preview uses this. */
   slug: string;
   templateSlug: string;
   plan: PlanId;
   paid: boolean;
+  /** True when a live revision is publicly available (without ?preview=1). */
   published: boolean;
   createdAt: string;
+  /** Draft last-saved time. */
   updatedAt: string;
+  /** Draft modules / content / palette — autosave writes here only. */
   modules: ModuleState[];
   content: EventContent;
   paletteOverride?: Partial<Palette>;
+  /**
+   * Frozen live invitation. Updated only on explicit publish.
+   * Autosave must never overwrite this.
+   */
+  publishedRevision?: EventRevision | null;
 }
 
 export interface Guest {

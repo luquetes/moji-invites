@@ -32,10 +32,10 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
   const [event, setEvent] = useState(initial);
   const [tab, setTab] = useState<"modulos" | "contenido" | "estilo">("modulos");
   const [highlight, setHighlight] = useState<ModuleId>("cover");
-  const [status, setStatus] = useState("Guardado");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(initial.updatedAt);
+  const [publishing, setPublishing] = useState(false);
   const template = getTemplate(event.templateSlug);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -54,18 +54,23 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     }
     savingRef.current = true;
     setSaving(true);
-    setStatus("Guardando…");
     const snapshot = eventRef.current;
     try {
       const res = await fetch(`/api/events/${snapshot.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(snapshot),
+        body: JSON.stringify({
+          slug: snapshot.slug,
+          templateSlug: snapshot.templateSlug,
+          plan: snapshot.plan,
+          modules: snapshot.modules,
+          content: snapshot.content,
+          paletteOverride: snapshot.paletteOverride,
+        }),
       });
       if (!res.ok) {
         dirtyRef.current = true;
         setDirty(true);
-        setStatus("No se pudo guardar");
         return;
       }
       const data = (await res.json()) as { event: InviteEvent };
@@ -73,11 +78,15 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       if (eventRef.current === snapshot) {
         dirtyRef.current = false;
         setDirty(false);
-        setStatus("Guardado");
+        setEvent((prev) => ({
+          ...prev,
+          updatedAt: data.event.updatedAt,
+          published: data.event.published,
+          publishedRevision: data.event.publishedRevision,
+        }));
       } else {
         dirtyRef.current = true;
         setDirty(true);
-        setStatus("Sin guardar");
       }
     } finally {
       savingRef.current = false;
@@ -110,7 +119,6 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     setEvent(next);
     dirtyRef.current = true;
     setDirty(true);
-    setStatus("Sin guardar");
     debouncedSave();
   }
 
@@ -120,6 +128,36 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       return;
     }
     void persistRef.current();
+  }
+
+  async function publishNow() {
+    if (!event.paid || publishing) return;
+    setPublishing(true);
+    debouncedSave.cancel();
+    try {
+      const snapshot = eventRef.current;
+      const res = await fetch(`/api/events/${snapshot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "publish",
+          slug: snapshot.slug,
+          templateSlug: snapshot.templateSlug,
+          plan: snapshot.plan,
+          modules: snapshot.modules,
+          content: snapshot.content,
+          paletteOverride: snapshot.paletteOverride,
+        }),
+      });
+      const data = (await res.json()) as { event?: InviteEvent; error?: string };
+      if (!res.ok || !data.event) return;
+      setEvent(data.event);
+      setLastSavedAt(data.event.updatedAt);
+      dirtyRef.current = false;
+      setDirty(false);
+    } finally {
+      setPublishing(false);
+    }
   }
 
   function onDragEnd(ev: DragEndEvent) {
@@ -152,21 +190,30 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
           <p className="font-display text-xl">{template?.name} · {event.content.title}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-[11.5rem] shrink-0 text-right">
-            <p className="h-4 truncate text-xs text-ink/50">{status}</p>
-            <p className="truncate text-[10px] leading-tight text-ink/40">
-              Última edición {formatDateTime(lastSavedAt)}
-            </p>
-          </div>
-          <Link href={`/i/${event.slug}?preview=1`} className="rounded-full px-3 py-2 text-xs uppercase tracking-widest">
+          <Link
+            href={`/i/${event.slug}?preview=1&t=${encodeURIComponent(lastSavedAt)}`}
+            prefetch={false}
+            className="rounded-full px-3 py-2 text-xs uppercase tracking-widest"
+          >
             Preview
           </Link>
-          <Link
-            href={`/checkout/${event.id}`}
-            className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream"
-          >
-            {event.paid ? "Publicar" : "Comprar"}
-          </Link>
+          {event.paid ? (
+            <button
+              type="button"
+              onClick={() => void publishNow()}
+              disabled={publishing}
+              className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream disabled:opacity-50"
+            >
+              {publishing ? "Publicando…" : event.published ? "Actualizar publicación" : "Publicar"}
+            </button>
+          ) : (
+            <Link
+              href={`/checkout/${event.id}`}
+              className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream"
+            >
+              Comprar
+            </Link>
+          )}
         </div>
       </header>
 
@@ -228,19 +275,24 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={saveNow}
-        disabled={!dirty || saving}
-        className={cn(
-          "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full px-5 py-3 text-xs uppercase tracking-[0.16em] text-cream shadow-phone transition",
-          dirty && !saving ? "bg-ink" : "bg-ink/45",
-        )}
-        aria-label="Guardar cambios"
-      >
-        <Save size={16} />
-        {saving ? "Guardando" : dirty ? "Guardar" : "Guardado"}
-      </button>
+      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2">
+        <p className="text-[10px] leading-tight text-ink/40">
+          Última edición {formatDateTime(lastSavedAt)}
+        </p>
+        <button
+          type="button"
+          onClick={saveNow}
+          disabled={!dirty || saving}
+          className={cn(
+            "flex items-center gap-2 rounded-full px-5 py-3 text-xs uppercase tracking-[0.16em] text-cream shadow-phone transition",
+            dirty && !saving ? "bg-ink" : "bg-ink/45",
+          )}
+          aria-label="Guardar cambios"
+        >
+          <Save size={16} />
+          {saving ? "Guardando" : dirty ? "Guardar" : "Guardado"}
+        </button>
+      </div>
     </div>
   );
 }
