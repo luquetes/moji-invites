@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   DndContext,
@@ -17,34 +17,109 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Eye, EyeOff, Lock } from "lucide-react";
+import { Eye, EyeOff, GripVertical, Lock, Save } from "lucide-react";
 import type { EventContent, InviteEvent, ModuleId, ModuleState } from "@/lib/types";
 import { MODULE_CATALOG, moduleLabel } from "@/lib/modules";
 import { getTemplate } from "@/lib/templates";
 import { InvitationView } from "@/components/invitation/InvitationView";
 import { cn } from "@/lib/cn";
+import { createDebounced } from "@/lib/debounce";
+import { formatDateTime } from "@/lib/format";
+
+const SAVE_DEBOUNCE_MS = 2000;
 
 export function EditorShell({ initial }: { initial: InviteEvent }) {
   const [event, setEvent] = useState(initial);
   const [tab, setTab] = useState<"modulos" | "contenido" | "estilo">("modulos");
   const [highlight, setHighlight] = useState<ModuleId>("cover");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("Guardado");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(initial.updatedAt);
   const template = getTemplate(event.templateSlug);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  async function save(next = event) {
-    setEvent(next);
-    const res = await fetch(`/api/events/${next.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    });
-    if (!res.ok) {
-      setStatus("No se pudo guardar");
+  const eventRef = useRef(event);
+  eventRef.current = event;
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const queuedWhileSaving = useRef(false);
+
+  const persistRef = useRef<() => Promise<void>>(async () => undefined);
+
+  persistRef.current = async () => {
+    if (savingRef.current) {
+      queuedWhileSaving.current = true;
       return;
     }
-    setStatus("Guardado");
-    setTimeout(() => setStatus(""), 1500);
+    savingRef.current = true;
+    setSaving(true);
+    setStatus("Guardando…");
+    const snapshot = eventRef.current;
+    try {
+      const res = await fetch(`/api/events/${snapshot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshot),
+      });
+      if (!res.ok) {
+        dirtyRef.current = true;
+        setDirty(true);
+        setStatus("No se pudo guardar");
+        return;
+      }
+      const data = (await res.json()) as { event: InviteEvent };
+      setLastSavedAt(data.event.updatedAt);
+      if (eventRef.current === snapshot) {
+        dirtyRef.current = false;
+        setDirty(false);
+        setStatus("Guardado");
+      } else {
+        dirtyRef.current = true;
+        setDirty(true);
+        setStatus("Sin guardar");
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+      if (queuedWhileSaving.current) {
+        queuedWhileSaving.current = false;
+        void persistRef.current();
+      }
+    }
+  };
+
+  const debouncedSave = useMemo(
+    () => createDebounced(() => void persistRef.current(), SAVE_DEBOUNCE_MS),
+    [],
+  );
+
+  useEffect(() => () => debouncedSave.cancel(), [debouncedSave]);
+
+  useEffect(() => {
+    const onLeave = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, []);
+
+  function applyChange(next: InviteEvent) {
+    setEvent(next);
+    dirtyRef.current = true;
+    setDirty(true);
+    setStatus("Sin guardar");
+    debouncedSave();
+  }
+
+  function saveNow() {
+    if (debouncedSave.pending()) {
+      debouncedSave.flush();
+      return;
+    }
+    void persistRef.current();
   }
 
   function onDragEnd(ev: DragEndEvent) {
@@ -54,7 +129,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     const oldIndex = ids.indexOf(active.id as ModuleId);
     const newIndex = ids.indexOf(over.id as ModuleId);
     const modules = arrayMove(event.modules, oldIndex, newIndex);
-    void save({ ...event, modules });
+    applyChange({ ...event, modules });
   }
 
   function toggle(id: ModuleId) {
@@ -63,7 +138,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     const modules = event.modules.map((m) =>
       m.id === id ? { ...m, enabled: !m.enabled } : m,
     );
-    void save({ ...event, modules });
+    applyChange({ ...event, modules });
   }
 
   return (
@@ -76,8 +151,13 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
           <p className="text-[10px] uppercase tracking-[0.22em] text-ink/50">Editor en vivo</p>
           <p className="font-display text-xl">{template?.name} · {event.content.title}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-ink/50">{status}</span>
+        <div className="flex items-center gap-3">
+          <div className="w-[11.5rem] shrink-0 text-right">
+            <p className="h-4 truncate text-xs text-ink/50">{status}</p>
+            <p className="truncate text-[10px] leading-tight text-ink/40">
+              Última edición {formatDateTime(lastSavedAt)}
+            </p>
+          </div>
           <Link href={`/i/${event.slug}?preview=1`} className="rounded-full px-3 py-2 text-xs uppercase tracking-widest">
             Preview
           </Link>
@@ -129,14 +209,14 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
             <ContentForm
               content={event.content}
               slug={event.slug}
-              onChange={(content, slug) => void save({ ...event, content, slug })}
+              onChange={(content, slug) => applyChange({ ...event, content, slug })}
             />
           )}
 
           {tab === "estilo" && (
             <ThemePanel
               event={event}
-              onChange={(paletteOverride) => void save({ ...event, paletteOverride })}
+              onChange={(paletteOverride) => applyChange({ ...event, paletteOverride })}
             />
           )}
         </aside>
@@ -147,6 +227,20 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
           </PhoneFrame>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={saveNow}
+        disabled={!dirty || saving}
+        className={cn(
+          "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full px-5 py-3 text-xs uppercase tracking-[0.16em] text-cream shadow-phone transition",
+          dirty && !saving ? "bg-ink" : "bg-ink/45",
+        )}
+        aria-label="Guardar cambios"
+      >
+        <Save size={16} />
+        {saving ? "Guardando" : dirty ? "Guardar" : "Guardado"}
+      </button>
     </div>
   );
 }

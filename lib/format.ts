@@ -77,6 +77,18 @@ export function formatDateShort(iso: string): string {
   }).format(d);
 }
 
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 export function slugify(value: string): string {
   return value
     .normalize("NFD")
