@@ -24,6 +24,7 @@ import { getTemplate } from "@/lib/templates";
 import { InvitationView } from "@/components/invitation/InvitationView";
 import { cn } from "@/lib/cn";
 import { createDebounced } from "@/lib/debounce";
+import { markEditorClean, markEditorDirty } from "@/lib/editorSync";
 import { formatDateTime } from "@/lib/format";
 
 const SAVE_DEBOUNCE_MS = 2000;
@@ -43,15 +44,10 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
   eventRef.current = event;
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
-  const queuedWhileSaving = useRef(false);
-
   const persistRef = useRef<() => Promise<void>>(async () => undefined);
+  const persistTail = useRef(Promise.resolve());
 
   persistRef.current = async () => {
-    if (savingRef.current) {
-      queuedWhileSaving.current = true;
-      return;
-    }
     savingRef.current = true;
     setSaving(true);
     const snapshot = eventRef.current;
@@ -71,6 +67,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       if (!res.ok) {
         dirtyRef.current = true;
         setDirty(true);
+        markEditorDirty(snapshot.id);
         return;
       }
       const data = (await res.json()) as { event: InviteEvent };
@@ -78,6 +75,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       if (eventRef.current === snapshot) {
         dirtyRef.current = false;
         setDirty(false);
+        markEditorClean(snapshot.id);
         setEvent((prev) => ({
           ...prev,
           updatedAt: data.event.updatedAt,
@@ -87,38 +85,54 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       } else {
         dirtyRef.current = true;
         setDirty(true);
+        markEditorDirty(snapshot.id);
       }
     } finally {
       savingRef.current = false;
       setSaving(false);
-      if (queuedWhileSaving.current) {
-        queuedWhileSaving.current = false;
-        void persistRef.current();
-      }
     }
   };
 
+  function enqueuePersist() {
+    persistTail.current = persistTail.current.then(
+      () => persistRef.current(),
+      () => persistRef.current(),
+    );
+    return persistTail.current;
+  }
+
   const debouncedSave = useMemo(
-    () => createDebounced(() => void persistRef.current(), SAVE_DEBOUNCE_MS),
+    () => createDebounced(() => void enqueuePersist(), SAVE_DEBOUNCE_MS),
     [],
   );
 
-  useEffect(() => () => debouncedSave.cancel(), [debouncedSave]);
-
   useEffect(() => {
+    const flush = () => {
+      if (debouncedSave.pending()) {
+        debouncedSave.flush();
+        return;
+      }
+      if (dirtyRef.current) void enqueuePersist();
+    };
     const onLeave = (e: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return;
       e.preventDefault();
       e.returnValue = "";
     };
+    window.addEventListener("pagehide", flush);
     window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
-  }, []);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", onLeave);
+      flush();
+    };
+  }, [debouncedSave]);
 
   function applyChange(next: InviteEvent) {
     setEvent(next);
     dirtyRef.current = true;
     setDirty(true);
+    markEditorDirty(next.id);
     debouncedSave();
   }
 
@@ -127,7 +141,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       debouncedSave.flush();
       return;
     }
-    void persistRef.current();
+    void enqueuePersist();
   }
 
   async function publishNow() {
@@ -135,6 +149,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     setPublishing(true);
     debouncedSave.cancel();
     try {
+      await enqueuePersist();
       const snapshot = eventRef.current;
       const res = await fetch(`/api/events/${snapshot.id}`, {
         method: "PATCH",
@@ -155,9 +170,18 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
       setLastSavedAt(data.event.updatedAt);
       dirtyRef.current = false;
       setDirty(false);
+      markEditorClean(snapshot.id);
     } finally {
       setPublishing(false);
     }
+  }
+
+  async function openPreview(href: string) {
+    if (dirtyRef.current || debouncedSave.pending() || savingRef.current) {
+      debouncedSave.flush();
+      await enqueuePersist();
+    }
+    window.location.href = href;
   }
 
   function onDragEnd(ev: DragEndEvent) {
@@ -190,13 +214,16 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
           <p className="font-display text-xl">{template?.name} · {event.content.title}</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link
+          <a
             href={`/i/${event.slug}?preview=1&t=${encodeURIComponent(lastSavedAt)}`}
-            prefetch={false}
+            onClick={(e) => {
+              e.preventDefault();
+              void openPreview(`/i/${eventRef.current.slug}?preview=1&t=${encodeURIComponent(new Date().toISOString())}`);
+            }}
             className="rounded-full px-3 py-2 text-xs uppercase tracking-widest"
           >
             Preview
-          </Link>
+          </a>
           {event.paid ? (
             <button
               type="button"
