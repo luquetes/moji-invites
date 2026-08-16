@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   DndContext,
@@ -17,34 +17,171 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Eye, EyeOff, Lock } from "lucide-react";
+import { Eye, EyeOff, GripVertical, Lock, Save } from "lucide-react";
 import type { EventContent, InviteEvent, ModuleId, ModuleState } from "@/lib/types";
 import { MODULE_CATALOG, moduleLabel } from "@/lib/modules";
 import { getTemplate } from "@/lib/templates";
 import { InvitationView } from "@/components/invitation/InvitationView";
 import { cn } from "@/lib/cn";
+import { createDebounced } from "@/lib/debounce";
+import { markEditorClean, markEditorDirty } from "@/lib/editorSync";
+import { formatDateTime } from "@/lib/format";
+
+const SAVE_DEBOUNCE_MS = 2000;
 
 export function EditorShell({ initial }: { initial: InviteEvent }) {
   const [event, setEvent] = useState(initial);
   const [tab, setTab] = useState<"modulos" | "contenido" | "estilo">("modulos");
   const [highlight, setHighlight] = useState<ModuleId>("cover");
-  const [status, setStatus] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(initial.updatedAt);
+  const [publishing, setPublishing] = useState(false);
   const template = getTemplate(event.templateSlug);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  async function save(next = event) {
+  const eventRef = useRef(event);
+  eventRef.current = event;
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const persistRef = useRef<() => Promise<void>>(async () => undefined);
+  const persistTail = useRef(Promise.resolve());
+
+  persistRef.current = async () => {
+    savingRef.current = true;
+    setSaving(true);
+    const snapshot = eventRef.current;
+    try {
+      const res = await fetch(`/api/events/${snapshot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: snapshot.slug,
+          templateSlug: snapshot.templateSlug,
+          plan: snapshot.plan,
+          modules: snapshot.modules,
+          content: snapshot.content,
+          paletteOverride: snapshot.paletteOverride,
+        }),
+      });
+      if (!res.ok) {
+        dirtyRef.current = true;
+        setDirty(true);
+        markEditorDirty(snapshot.id);
+        return;
+      }
+      const data = (await res.json()) as { event: InviteEvent };
+      setLastSavedAt(data.event.updatedAt);
+      if (eventRef.current === snapshot) {
+        dirtyRef.current = false;
+        setDirty(false);
+        markEditorClean(snapshot.id);
+        setEvent((prev) => ({
+          ...prev,
+          updatedAt: data.event.updatedAt,
+          published: data.event.published,
+          publishedRevision: data.event.publishedRevision,
+        }));
+      } else {
+        dirtyRef.current = true;
+        setDirty(true);
+        markEditorDirty(snapshot.id);
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  function enqueuePersist() {
+    persistTail.current = persistTail.current.then(
+      () => persistRef.current(),
+      () => persistRef.current(),
+    );
+    return persistTail.current;
+  }
+
+  const debouncedSave = useMemo(
+    () => createDebounced(() => void enqueuePersist(), SAVE_DEBOUNCE_MS),
+    [],
+  );
+
+  useEffect(() => {
+    const flush = () => {
+      if (debouncedSave.pending()) {
+        debouncedSave.flush();
+        return;
+      }
+      if (dirtyRef.current) void enqueuePersist();
+    };
+    const onLeave = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", onLeave);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", onLeave);
+      flush();
+    };
+  }, [debouncedSave]);
+
+  function applyChange(next: InviteEvent) {
     setEvent(next);
-    const res = await fetch(`/api/events/${next.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    });
-    if (!res.ok) {
-      setStatus("No se pudo guardar");
+    dirtyRef.current = true;
+    setDirty(true);
+    markEditorDirty(next.id);
+    debouncedSave();
+  }
+
+  function saveNow() {
+    if (debouncedSave.pending()) {
+      debouncedSave.flush();
       return;
     }
-    setStatus("Guardado");
-    setTimeout(() => setStatus(""), 1500);
+    void enqueuePersist();
+  }
+
+  async function publishNow() {
+    if (!event.paid || publishing) return;
+    setPublishing(true);
+    debouncedSave.cancel();
+    try {
+      await enqueuePersist();
+      const snapshot = eventRef.current;
+      const res = await fetch(`/api/events/${snapshot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "publish",
+          slug: snapshot.slug,
+          templateSlug: snapshot.templateSlug,
+          plan: snapshot.plan,
+          modules: snapshot.modules,
+          content: snapshot.content,
+          paletteOverride: snapshot.paletteOverride,
+        }),
+      });
+      const data = (await res.json()) as { event?: InviteEvent; error?: string };
+      if (!res.ok || !data.event) return;
+      setEvent(data.event);
+      setLastSavedAt(data.event.updatedAt);
+      dirtyRef.current = false;
+      setDirty(false);
+      markEditorClean(snapshot.id);
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function openPreview(href: string) {
+    if (dirtyRef.current || debouncedSave.pending() || savingRef.current) {
+      debouncedSave.flush();
+      await enqueuePersist();
+    }
+    window.location.href = href;
   }
 
   function onDragEnd(ev: DragEndEvent) {
@@ -54,7 +191,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     const oldIndex = ids.indexOf(active.id as ModuleId);
     const newIndex = ids.indexOf(over.id as ModuleId);
     const modules = arrayMove(event.modules, oldIndex, newIndex);
-    void save({ ...event, modules });
+    applyChange({ ...event, modules });
   }
 
   function toggle(id: ModuleId) {
@@ -63,7 +200,7 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
     const modules = event.modules.map((m) =>
       m.id === id ? { ...m, enabled: !m.enabled } : m,
     );
-    void save({ ...event, modules });
+    applyChange({ ...event, modules });
   }
 
   return (
@@ -76,17 +213,34 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
           <p className="text-[10px] uppercase tracking-[0.22em] text-ink/50">Editor en vivo</p>
           <p className="font-display text-xl">{template?.name} · {event.content.title}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-ink/50">{status}</span>
-          <Link href={`/i/${event.slug}?preview=1`} className="rounded-full px-3 py-2 text-xs uppercase tracking-widest">
-            Preview
-          </Link>
-          <Link
-            href={`/checkout/${event.id}`}
-            className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream"
+        <div className="flex items-center gap-3">
+          <a
+            href={`/i/${event.slug}?preview=1&t=${encodeURIComponent(lastSavedAt)}`}
+            onClick={(e) => {
+              e.preventDefault();
+              void openPreview(`/i/${eventRef.current.slug}?preview=1&t=${encodeURIComponent(new Date().toISOString())}`);
+            }}
+            className="rounded-full px-3 py-2 text-xs uppercase tracking-widest"
           >
-            {event.paid ? "Publicar" : "Comprar"}
-          </Link>
+            Preview
+          </a>
+          {event.paid ? (
+            <button
+              type="button"
+              onClick={() => void publishNow()}
+              disabled={publishing}
+              className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream disabled:opacity-50"
+            >
+              {publishing ? "Publicando…" : event.published ? "Actualizar publicación" : "Publicar"}
+            </button>
+          ) : (
+            <Link
+              href={`/checkout/${event.id}`}
+              className="rounded-full bg-ink px-4 py-2 text-xs uppercase tracking-[0.16em] text-cream"
+            >
+              Comprar
+            </Link>
+          )}
         </div>
       </header>
 
@@ -129,14 +283,14 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
             <ContentForm
               content={event.content}
               slug={event.slug}
-              onChange={(content, slug) => void save({ ...event, content, slug })}
+              onChange={(content, slug) => applyChange({ ...event, content, slug })}
             />
           )}
 
           {tab === "estilo" && (
             <ThemePanel
               event={event}
-              onChange={(paletteOverride) => void save({ ...event, paletteOverride })}
+              onChange={(paletteOverride) => applyChange({ ...event, paletteOverride })}
             />
           )}
         </aside>
@@ -146,6 +300,25 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
             <InvitationView event={event} compact highlight={highlight} />
           </PhoneFrame>
         </div>
+      </div>
+
+      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2">
+        <p className="text-[10px] leading-tight text-ink/40">
+          Última edición {formatDateTime(lastSavedAt)}
+        </p>
+        <button
+          type="button"
+          onClick={saveNow}
+          disabled={!dirty || saving}
+          className={cn(
+            "flex items-center gap-2 rounded-full px-5 py-3 text-xs uppercase tracking-[0.16em] text-cream shadow-phone transition",
+            dirty && !saving ? "bg-ink" : "bg-ink/45",
+          )}
+          aria-label="Guardar cambios"
+        >
+          <Save size={16} />
+          {saving ? "Guardando" : dirty ? "Guardar" : "Guardado"}
+        </button>
       </div>
     </div>
   );

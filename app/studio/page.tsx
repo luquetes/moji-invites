@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getActiveEvent, listGuests, listSocialPosts } from "@/lib/store";
 import { rsvpCounts, canPublish } from "@/lib/social";
+import { publicSlug } from "@/lib/eventRevision";
 import { getTemplate } from "@/lib/templates";
 import { PublishButton } from "@/components/studio/PublishButton";
 
@@ -14,13 +15,14 @@ export default function StudioHome() {
   const posts = listSocialPosts(event.id);
   const template = getTemplate(event.templateSlug);
   const publish = canPublish(event);
+  const liveSlug = publicSlug(event);
 
   return (
     <div>
       <p className="text-xs uppercase tracking-[0.28em] text-gold-deep">Mini backoffice</p>
       <h1 className="mt-2 font-display text-5xl">{event.content.title}</h1>
       <p className="mt-2 text-ink/60">
-        {template?.name} · /i/{event.slug} · {event.paid ? "Pago" : "Pendiente de pago"} ·{" "}
+        {template?.name} · /i/{liveSlug} · {event.paid ? "Pago" : "Pendiente de pago"} ·{" "}
         {event.published ? "Publicada" : "Borrador"}
       </p>
 
@@ -41,7 +43,7 @@ export default function StudioHome() {
       <div className="mt-8 flex flex-wrap gap-3">
         <PublishButton eventId={event.id} published={event.published} canPublish={publish.ok} reason={publish.reason} />
         <Link
-          href={event.published ? `/i/${event.slug}` : `/i/${event.slug}?preview=1`}
+          href={event.published ? `/i/${liveSlug}` : `/i/${event.slug}?preview=1`}
           className="rounded-full border border-ink/15 px-4 py-2 text-xs uppercase tracking-widest"
         >
           Ver invitación

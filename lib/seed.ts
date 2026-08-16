@@ -1,12 +1,13 @@
 import { defaultModules } from "./modules";
 import { defaultContent, uid } from "./format";
+import { snapshotRevision } from "./eventRevision";
 import type { Database, Guest, InviteEvent, SocialPost } from "./types";
 
 const DEMO_ID = "evt_demo_sofia";
 
 export function seedDatabase(): Database {
   const now = new Date().toISOString();
-  const event: InviteEvent = {
+  const draft: InviteEvent = {
     id: DEMO_ID,
     slug: "sofia-y-martin",
     templateSlug: "magnolias-gold",
@@ -19,6 +20,10 @@ export function seedDatabase(): Database {
       ["music", "menu", "instagram"].includes(m.id) ? { ...m, enabled: true } : m,
     ),
     content: defaultContent(),
+  };
+  const event: InviteEvent = {
+    ...draft,
+    publishedRevision: snapshotRevision(draft),
   };
 
   const guests: Guest[] = [

@@ -27,6 +27,6 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString(),
   });
 
-  const updated = upsertEvent({ ...event, paid: true, plan, published: true });
+  const updated = upsertEvent({ ...event, paid: true, plan });
   return NextResponse.json({ payment, event: updated });
 }

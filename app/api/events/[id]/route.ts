@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getEvent, upsertEvent } from "@/lib/store";
-import { canPublish } from "@/lib/social";
-import type { InviteEvent } from "@/lib/types";
+import { applyEventPatch, type EventPatch } from "@/lib/eventPatch";
+import { withEventLock } from "@/lib/lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,23 +21,17 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const current = getEvent(id);
-  if (!current) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+  const patch = (await request.json()) as EventPatch;
 
-  const patch = (await request.json()) as Partial<InviteEvent>;
-  const next: InviteEvent = {
-    ...current,
-    ...patch,
-    id: current.id,
-    paid: current.paid || Boolean(patch.paid),
-  };
+  return withEventLock(id, () => {
+    const current = getEvent(id);
+    if (!current) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
-  if (patch.published && !current.published) {
-    const gate = canPublish(next);
-    if (!gate.ok) {
-      return NextResponse.json({ error: gate.reason }, { status: 402 });
+    const result = applyEventPatch(current, patch);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 402 });
     }
-  }
 
-  return NextResponse.json({ event: upsertEvent(next) });
+    return NextResponse.json({ event: upsertEvent(result.event) });
+  });
 }

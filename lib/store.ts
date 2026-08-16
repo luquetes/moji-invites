@@ -8,10 +8,12 @@ import type {
   SocialPost,
 } from "./types";
 import { seedDatabase } from "./seed";
+import { matchesSlug, normalizeEvent } from "./eventRevision";
 
 const DEFAULT_PATH = path.join(process.cwd(), "data", "db.json");
 
 let memory: Database | null = null;
+let memoryMtimeMs = -1;
 let filePath = DEFAULT_PATH;
 let persistToDisk = true;
 
@@ -19,6 +21,7 @@ export function configureStore(options: { filePath?: string; persist?: boolean }
   filePath = options.filePath ?? DEFAULT_PATH;
   persistToDisk = options.persist ?? true;
   memory = null;
+  memoryMtimeMs = -1;
 }
 
 function emptyDb(): Database {
@@ -26,20 +29,28 @@ function emptyDb(): Database {
 }
 
 function readDb(): Database {
-  if (memory) return memory;
+  // Always reconcile from disk when persisting. Next.js can load this module in
+  // separate bundles (API routes vs pages), so an in-memory-only cache goes stale
+  // after another isolate writes db.json.
   if (persistToDisk) {
     try {
       if (fs.existsSync(filePath)) {
+        const mtimeMs = fs.statSync(filePath).mtimeMs;
+        if (memory && mtimeMs === memoryMtimeMs) return memory;
         const raw = fs.readFileSync(filePath, "utf8");
         memory = JSON.parse(raw) as Database;
+        memoryMtimeMs = mtimeMs;
         return memory;
       }
     } catch {
       // fall through to seed
     }
+    memory = seedDatabase();
+    writeDb(memory);
+    return memory;
   }
+  if (memory) return memory;
   memory = seedDatabase();
-  writeDb(memory);
   return memory;
 }
 
@@ -48,6 +59,7 @@ function writeDb(db: Database) {
   if (!persistToDisk) return;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(db, null, 2));
+  memoryMtimeMs = fs.statSync(filePath).mtimeMs;
 }
 
 export function getDb(): Database {
@@ -59,25 +71,28 @@ export function resetStore(db: Database = seedDatabase()) {
 }
 
 export function listEvents(): InviteEvent[] {
-  return readDb().events;
+  return readDb().events.map(normalizeEvent);
 }
 
 export function getActiveEvent(): InviteEvent | undefined {
-  return readDb().events[0];
+  const event = readDb().events[0];
+  return event ? normalizeEvent(event) : undefined;
 }
 
 export function getEvent(id: string): InviteEvent | undefined {
-  return readDb().events.find((e) => e.id === id);
+  const event = readDb().events.find((e) => e.id === id);
+  return event ? normalizeEvent(event) : undefined;
 }
 
 export function getEventBySlug(slug: string): InviteEvent | undefined {
-  return readDb().events.find((e) => e.slug === slug);
+  const event = readDb().events.find((e) => matchesSlug(e, slug));
+  return event ? normalizeEvent(event) : undefined;
 }
 
 export function upsertEvent(event: InviteEvent): InviteEvent {
   const db = readDb();
   const idx = db.events.findIndex((e) => e.id === event.id);
-  const next = { ...event, updatedAt: new Date().toISOString() };
+  const next = normalizeEvent({ ...event, updatedAt: new Date().toISOString() });
   if (idx >= 0) db.events.splice(idx, 1);
   db.events.unshift(next);
   writeDb(db);

@@ -4,6 +4,7 @@ import { canPublish, generateSocialPack, rsvpCounts } from "./social";
 import { configureStore, getEvent, listGuests, resetStore, upsertEvent } from "./store";
 import { seedDatabase } from "./seed";
 import { defaultContent } from "./format";
+import { snapshotRevision } from "./eventRevision";
 import type { InviteEvent } from "./types";
 
 describe("modules", () => {
@@ -100,6 +101,7 @@ describe("store", () => {
   it("seeds the demo event and guests", () => {
     const event = getEvent("evt_demo_sofia");
     expect(event?.slug).toBe("sofia-y-martin");
+    expect(event?.publishedRevision?.slug).toBe("sofia-y-martin");
     expect(listGuests("evt_demo_sofia").length).toBeGreaterThan(3);
   });
 
@@ -108,5 +110,33 @@ describe("store", () => {
     const modules = reorderModules(event.modules, "gifts", "cover");
     upsertEvent({ ...event, modules });
     expect(getEvent("evt_demo_sofia")?.modules[0].id).toBe("gifts");
+  });
+
+  it("keeps published revision unchanged when draft content is edited", () => {
+    const event = getEvent("evt_demo_sofia")!;
+    const liveSubtitle = event.publishedRevision?.content.subtitle;
+    upsertEvent({
+      ...event,
+      content: { ...event.content, subtitle: "Borrador distinto" },
+    });
+    const next = getEvent("evt_demo_sofia")!;
+    expect(next.content.subtitle).toBe("Borrador distinto");
+    expect(next.publishedRevision?.content.subtitle).toBe(liveSubtitle);
+  });
+
+  it("copies draft into published revision on publish helper snapshot", () => {
+    const event = getEvent("evt_demo_sofia")!;
+    const draft = {
+      ...event,
+      content: { ...event.content, subtitle: "Nueva versión live" },
+      publishedRevision: snapshotRevision({
+        ...event,
+        content: { ...event.content, subtitle: "Nueva versión live" },
+      }),
+    };
+    upsertEvent(draft);
+    expect(getEvent("evt_demo_sofia")?.publishedRevision?.content.subtitle).toBe(
+      "Nueva versión live",
+    );
   });
 });
