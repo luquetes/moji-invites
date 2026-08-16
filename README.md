@@ -2,6 +2,8 @@
 
 Prototipo de un sistema de templates de invitaciones, inspirado en [Fixdate](https://fixdate.io/ar/) pero **self-serve**: el anfitrión customiza en vivo, paga, publica y sigue el RSVP desde un mini backoffice.
 
+La idea de producto, el modelo draft vs live y las invariantes de ingeniería están en [CLAUDE.md](./CLAUDE.md) (Cursor y otros agentes también leen [AGENTS.md](./AGENTS.md)).
+
 ## Qué incluye
 
 - **Sets de templates** (Bodas, 15 años, Comunión) con paleta, tipografía y ornamentación propias: Magnolias Gold, Deluxe Classic, Vintage, Tropical, Navy Romance, Bohemio, Aurum Wine, Minimalista, Playa, Aurora, Jardín Rosa, Lino.
