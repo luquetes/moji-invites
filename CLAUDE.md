@@ -57,7 +57,7 @@ Demo seed (`lib/seed.ts`): event `evt_demo_sofia`, slug `sofia-y-martin`, plan P
 See `lib/types.ts`.
 
 - **Template set** (`lib/templates.ts`): palette, display font, ornament, category, preview image.
-- **Modules** (`lib/modules.ts`): cover, countdown, hosts, itinerary, location, dresscode, gallery, music, gifts, rsvp, menu, stay, transport, instagram, faq.
+- **Modules** (`lib/modules.ts`): cover, countdown, hosts, ceremony, party, dresscode, gallery, playlist, inviteMusic, gifts, rsvp, menu, stay, transport, instagram, faq. Each catalog entry owns its Contenido fields; editor Contenido follows Módulos order. Guests can store `songSuggestion` for the collaborative playlist.
 - **InviteEvent**: draft document + `published` + optional `publishedRevision` (`lib/eventRevision.ts`).
 - **Guest**: tokenized link, `accepted | declined | pending`, plus-ones.
 - **Plans** (`lib/format.ts`): Esencial / Completo / Premium (ARS). Redes automation is Premium-only.

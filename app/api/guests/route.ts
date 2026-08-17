@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     status: "pending",
     message: "",
     dietary: "",
+    songSuggestion: "",
   };
   upsertGuest(guest);
   return NextResponse.json({ guest });

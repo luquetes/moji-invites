@@ -13,12 +13,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invitación no publicada" }, { status: 404 });
   }
 
-  const status = body.status as RsvpStatus;
-  if (status !== "accepted" && status !== "declined") {
+  const status = body.status as RsvpStatus | undefined;
+  if (status && status !== "accepted" && status !== "declined") {
     return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
   }
 
   const existing = body.token ? getGuestByToken(body.token) : undefined;
+  const nextStatus = status ?? existing?.status ?? "pending";
+  const songSuggestion =
+    typeof body.songSuggestion === "string"
+      ? body.songSuggestion.trim()
+      : (existing?.songSuggestion ?? "");
+
+  if (!status && !existing && !songSuggestion) {
+    return NextResponse.json({ error: "Nada para guardar" }, { status: 400 });
+  }
+
   const guest: Guest = {
     id: existing?.id ?? uid("gst"),
     eventId: event.id,
@@ -27,10 +37,11 @@ export async function POST(request: Request) {
     phone: existing?.phone ?? "",
     plusOnes: Number(body.plusOnes ?? existing?.plusOnes ?? 0),
     token: existing?.token ?? uid("tok"),
-    status,
-    message: body.message ?? "",
-    dietary: body.dietary ?? "",
-    respondedAt: new Date().toISOString(),
+    status: nextStatus,
+    message: body.message ?? existing?.message ?? "",
+    dietary: body.dietary ?? existing?.dietary ?? "",
+    songSuggestion,
+    respondedAt: status ? new Date().toISOString() : existing?.respondedAt,
   };
   upsertGuest(guest);
   return NextResponse.json({ guest });

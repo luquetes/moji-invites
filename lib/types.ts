@@ -11,11 +11,12 @@ export type ModuleId =
   | "cover"
   | "countdown"
   | "hosts"
-  | "itinerary"
-  | "location"
+  | "ceremony"
+  | "party"
   | "dresscode"
   | "gallery"
-  | "music"
+  | "playlist"
+  | "inviteMusic"
   | "gifts"
   | "rsvp"
   | "menu"
@@ -23,6 +24,8 @@ export type ModuleId =
   | "transport"
   | "instagram"
   | "faq";
+
+export type ModuleFieldKind = "text" | "textarea" | "date" | "url" | "checkbox";
 
 export type RsvpStatus = "pending" | "accepted" | "declined";
 export type PaymentProvider = "stripe" | "mercadopago";
@@ -61,14 +64,6 @@ export interface TemplateSet {
   comingSoon?: boolean;
 }
 
-export interface ModuleDef {
-  id: ModuleId;
-  label: string;
-  description: string;
-  locked?: boolean;
-  defaultEnabled: boolean;
-}
-
 export interface ModuleState {
   id: ModuleId;
   enabled: boolean;
@@ -79,25 +74,56 @@ export interface EventContent {
   subtitle: string;
   hosts: string;
   date: string;
+  /** Ceremony start time, e.g. "17:00". */
   time: string;
+  /** Party / reception start time, e.g. "21:00". */
+  timeParty: string;
   city: string;
   venueCeremony: string;
   addressCeremony: string;
+  /** Show an embedded mini map for the ceremony address. */
+  showMapCeremony: boolean;
   venueParty: string;
   addressParty: string;
+  /** Show an embedded mini map for the party address. */
+  showMapParty: boolean;
   story: string;
   dresscode: string;
   giftMessage: string;
   giftAlias: string;
   giftCbu: string;
+  /** Copy inviting guests to add a song to the shared playlist. */
   musicNote: string;
+  /** Public collaborative playlist URL (Spotify, etc.). */
   playlistUrl: string;
+  /** YouTube URL for the invitation soundtrack (hidden embed + FAB). */
+  inviteMusicUrl: string;
   instagramHandle: string;
   menu: string;
   stay: string;
   transport: string;
   faq: { q: string; a: string }[];
   gallery: { src: string; alt: string }[];
+}
+
+/** Editable content field owned by a module entity. */
+export interface ModuleFieldDef {
+  key: keyof EventContent;
+  label: string;
+  kind: ModuleFieldKind;
+  rows?: number;
+}
+
+export interface ModuleDef {
+  id: ModuleId;
+  label: string;
+  description: string;
+  locked?: boolean;
+  defaultEnabled: boolean;
+  /** Content fields this module owns (Contenido tab). */
+  fields: ModuleFieldDef[];
+  /** Shown in Contenido when the module has no editable fields yet. */
+  emptyHint?: string;
 }
 
 /** Snapshot of invitation content shown at /i/[slug] when published. */
@@ -142,6 +168,8 @@ export interface Guest {
   status: RsvpStatus;
   message: string;
   dietary: string;
+  /** Song the guest wants on the collaborative playlist. */
+  songSuggestion: string;
   respondedAt?: string;
 }
 
