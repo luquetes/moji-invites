@@ -16,6 +16,7 @@ export function GuestTable({ guests }: { guests: Guest[] }) {
             <th className="px-4 py-3">Invitado</th>
             <th className="px-4 py-3">Estado</th>
             <th className="px-4 py-3">+1</th>
+            <th className="px-4 py-3">Canción</th>
             <th className="px-4 py-3">Mensaje</th>
             <th className="px-4 py-3">Fecha</th>
           </tr>
@@ -41,6 +42,7 @@ export function GuestTable({ guests }: { guests: Guest[] }) {
                 </span>
               </td>
               <td className="px-4 py-3">{guest.plusOnes}</td>
+              <td className="px-4 py-3 text-ink/60">{guest.songSuggestion || "—"}</td>
               <td className="px-4 py-3 text-ink/60">{guest.message || "—"}</td>
               <td className="px-4 py-3 text-ink/50">
                 {guest.respondedAt ? formatDateShort(guest.respondedAt) : "—"}

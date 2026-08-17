@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { defaultModules, reorderModules, toggleModule } from "./modules";
+import {
+  defaultModules,
+  moduleFields,
+  normalizeModules,
+  reorderModules,
+  toggleModule,
+} from "./modules";
 import { canPublish, generateSocialPack, rsvpCounts } from "./social";
 import { configureStore, getEvent, listGuests, resetStore, upsertEvent } from "./store";
 import { seedDatabase } from "./seed";
@@ -24,6 +30,46 @@ describe("modules", () => {
     const ids = next.map((m) => m.id);
     expect(ids.indexOf("rsvp")).toBeLessThan(ids.indexOf("countdown"));
   });
+
+  it("defaults include ceremony and party instead of itinerary/location", () => {
+    const ids = defaultModules().map((m) => m.id);
+    expect(ids).toContain("ceremony");
+    expect(ids).toContain("party");
+    expect(ids).not.toContain("itinerary");
+    expect(ids).not.toContain("location");
+  });
+
+  it("maps legacy itinerary/location to ceremony/party", () => {
+    const next = normalizeModules([
+      { id: "cover", enabled: true },
+      { id: "itinerary", enabled: true },
+      { id: "location", enabled: false },
+      { id: "gifts", enabled: true },
+    ]);
+    const ids = next.map((m) => m.id);
+    expect(ids).not.toContain("itinerary");
+    expect(ids).not.toContain("location");
+    expect(ids.indexOf("ceremony")).toBe(1);
+    expect(ids.indexOf("party")).toBe(2);
+    expect(next.find((m) => m.id === "ceremony")?.enabled).toBe(true);
+    expect(next.find((m) => m.id === "party")?.enabled).toBe(false);
+    expect(moduleFields("ceremony").map((f) => f.key)).toContain("venueCeremony");
+    expect(moduleFields("party").map((f) => f.key)).toContain("timeParty");
+  });
+
+  it("maps legacy music to playlist and inviteMusic", () => {
+    const next = normalizeModules([
+      { id: "cover", enabled: true },
+      { id: "music", enabled: true },
+      { id: "gifts", enabled: true },
+    ]);
+    const ids = next.map((m) => m.id);
+    expect(ids).not.toContain("music");
+    expect(ids).toContain("playlist");
+    expect(ids).toContain("inviteMusic");
+    expect(next.find((m) => m.id === "playlist")?.enabled).toBe(true);
+    expect(next.find((m) => m.id === "inviteMusic")?.enabled).toBe(true);
+  });
 });
 
 describe("rsvp and publish", () => {
@@ -41,6 +87,7 @@ describe("rsvp and publish", () => {
     token: `t${i}`,
     message: "",
     dietary: "",
+    songSuggestion: "",
     ...g,
   }));
 

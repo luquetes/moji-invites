@@ -17,7 +17,9 @@ export function seedDatabase(): Database {
     createdAt: now,
     updatedAt: now,
     modules: defaultModules().map((m) =>
-      ["music", "menu", "instagram"].includes(m.id) ? { ...m, enabled: true } : m,
+      ["playlist", "inviteMusic", "menu", "instagram"].includes(m.id)
+        ? { ...m, enabled: true }
+        : m,
     ),
     content: defaultContent(),
   };
@@ -27,14 +29,14 @@ export function seedDatabase(): Database {
   };
 
   const guests: Guest[] = [
-    guest(event.id, "Valentina Ruiz", "vale@mail.com", "5491111111111", "accepted", 1, "¡Ahí vamos!"),
-    guest(event.id, "Joaquín Pérez", "joaco@mail.com", "5491111111112", "accepted", 0),
+    guest(event.id, "Valentina Ruiz", "vale@mail.com", "5491111111111", "accepted", 1, "¡Ahí vamos!", "Dancing Queen"),
+    guest(event.id, "Joaquín Pérez", "joaco@mail.com", "5491111111112", "accepted", 0, "", "September — Earth, Wind & Fire"),
     guest(event.id, "Camila Gómez", "cami@mail.com", "5491111111113", "declined", 0, "Estamos de viaje"),
     guest(event.id, "Lucas Fernández", "lucas@mail.com", "5491111111114", "pending", 1),
-    guest(event.id, "Martina Díaz", "martina@mail.com", "5491111111115", "accepted", 0),
+    guest(event.id, "Martina Díaz", "martina@mail.com", "5491111111115", "accepted", 0, "", "Blinding Lights"),
     guest(event.id, "Nicolás Blanco", "nico@mail.com", "5491111111116", "pending", 0),
     guest(event.id, "Elena Castro", "elena@mail.com", "5491111111117", "declined", 0),
-    guest(event.id, "Tomás Aguilar", "tomas@mail.com", "5491111111118", "accepted", 2, "Llevamos a los chicos"),
+    guest(event.id, "Tomás Aguilar", "tomas@mail.com", "5491111111118", "accepted", 2, "Llevamos a los chicos", "Don't Stop Me Now"),
   ];
 
   const socialPosts: SocialPost[] = [
@@ -89,6 +91,7 @@ function guest(
   status: Guest["status"],
   plusOnes: number,
   message = "",
+  songSuggestion = "",
 ): Guest {
   return {
     id: uid("gst"),
@@ -101,6 +104,7 @@ function guest(
     status,
     message,
     dietary: "",
+    songSuggestion,
     respondedAt: status === "pending" ? undefined : new Date().toISOString(),
   };
 }

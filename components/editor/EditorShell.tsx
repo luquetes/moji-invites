@@ -25,7 +25,7 @@ import { InvitationView } from "@/components/invitation/InvitationView";
 import { cn } from "@/lib/cn";
 import { createDebounced } from "@/lib/debounce";
 import { markEditorClean, markEditorDirty } from "@/lib/editorSync";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, toDateInputValue, withDateInputValue } from "@/lib/format";
 
 const SAVE_DEBOUNCE_MS = 2000;
 
@@ -283,6 +283,9 @@ export function EditorShell({ initial }: { initial: InviteEvent }) {
             <ContentForm
               content={event.content}
               slug={event.slug}
+              modules={event.modules}
+              highlight={highlight}
+              onHighlight={setHighlight}
               onChange={(content, slug) => applyChange({ ...event, content, slug })}
             />
           )}
@@ -388,32 +391,28 @@ function PhoneFrame({ children }: { children: ReactNode }) {
 function ContentForm({
   content,
   slug,
+  modules,
+  highlight,
+  onHighlight,
   onChange,
 }: {
   content: EventContent;
   slug: string;
+  modules: ModuleState[];
+  highlight: ModuleId;
+  onHighlight: (id: ModuleId) => void;
   onChange: (content: EventContent, slug: string) => void;
 }) {
-  const fields: { key: keyof EventContent; label: string }[] = useMemo(
-    () => [
-      { key: "title", label: "Título" },
-      { key: "subtitle", label: "Bajada" },
-      { key: "hosts", label: "Anfitriones" },
-      { key: "city", label: "Ciudad" },
-      { key: "time", label: "Hora" },
-      { key: "venueCeremony", label: "Ceremonia" },
-      { key: "addressCeremony", label: "Dirección ceremonia" },
-      { key: "venueParty", label: "Fiesta" },
-      { key: "addressParty", label: "Dirección fiesta" },
-      { key: "dresscode", label: "Dress code" },
-      { key: "giftAlias", label: "Alias regalos" },
-      { key: "instagramHandle", label: "Instagram" },
-    ],
-    [],
-  );
+  function patchField(key: keyof EventContent, value: string | boolean) {
+    if (key === "date" && typeof value === "string") {
+      onChange({ ...content, date: withDateInputValue(content.date, value) }, slug);
+      return;
+    }
+    onChange({ ...content, [key]: value }, slug);
+  }
 
   return (
-    <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+    <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
       <label className="block text-xs">
         Link
         <input
@@ -422,24 +421,93 @@ function ContentForm({
           className="mt-1 w-full rounded-xl border border-ink/10 bg-cream px-3 py-2 text-sm"
         />
       </label>
-      {fields.map((f) => (
-        <label key={f.key} className="block text-xs">
-          {f.label}
-          <input
-            value={String(content[f.key] ?? "")}
-            onChange={(e) => onChange({ ...content, [f.key]: e.target.value }, slug)}
-            className="mt-1 w-full rounded-xl border border-ink/10 bg-cream px-3 py-2 text-sm"
-          />
-        </label>
-      ))}
-      <label className="block text-xs">
-        Historia
-        <textarea
-          value={content.story}
-          onChange={(e) => onChange({ ...content, story: e.target.value }, slug)}
-          className="mt-1 h-24 w-full rounded-xl border border-ink/10 bg-cream px-3 py-2 text-sm"
-        />
-      </label>
+
+      {modules.map((mod) => {
+        const def = MODULE_CATALOG.find((m) => m.id === mod.id);
+        if (!def) return null;
+        const active = highlight === mod.id;
+
+        return (
+          <section
+            key={mod.id}
+            className={cn(
+              "rounded-2xl border px-3 py-3",
+              active ? "border-gold bg-cream/80" : "border-ink/10",
+              !mod.enabled && "opacity-55",
+            )}
+            onFocusCapture={() => onHighlight(mod.id)}
+            onClick={() => onHighlight(mod.id)}
+          >
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-ink/55">{def.label}</p>
+              {!mod.enabled && (
+                <span className="text-[10px] uppercase tracking-widest text-ink/35">Oculto</span>
+              )}
+            </div>
+
+            {def.fields.length === 0 ? (
+              <p className="text-xs text-ink/45">{def.emptyHint ?? "Sin campos editables."}</p>
+            ) : (
+              <div className="space-y-2">
+                {def.fields.map((field) => {
+                  const inputClass =
+                    "mt-1 w-full rounded-xl border border-ink/10 bg-cream px-3 py-2 text-sm";
+                  if (field.kind === "checkbox") {
+                    return (
+                      <label key={field.key} className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(content[field.key])}
+                          onChange={(e) => patchField(field.key, e.target.checked)}
+                          className="h-4 w-4 rounded border-ink/20"
+                        />
+                        {field.label}
+                      </label>
+                    );
+                  }
+                  if (field.kind === "date") {
+                    return (
+                      <label key={field.key} className="block text-xs">
+                        {field.label}
+                        <input
+                          type="date"
+                          value={toDateInputValue(content.date)}
+                          onChange={(e) => patchField("date", e.target.value)}
+                          className={inputClass}
+                        />
+                      </label>
+                    );
+                  }
+                  if (field.kind === "textarea") {
+                    return (
+                      <label key={field.key} className="block text-xs">
+                        {field.label}
+                        <textarea
+                          value={String(content[field.key] ?? "")}
+                          onChange={(e) => patchField(field.key, e.target.value)}
+                          rows={field.rows ?? 3}
+                          className={inputClass}
+                        />
+                      </label>
+                    );
+                  }
+                  return (
+                    <label key={field.key} className="block text-xs">
+                      {field.label}
+                      <input
+                        type={field.kind === "url" ? "url" : "text"}
+                        value={String(content[field.key] ?? "")}
+                        onChange={(e) => patchField(field.key, e.target.value)}
+                        className={inputClass}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

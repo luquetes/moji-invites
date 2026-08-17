@@ -100,20 +100,33 @@ export function upsertEvent(event: InviteEvent): InviteEvent {
 }
 
 export function listGuests(eventId: string): Guest[] {
-  return readDb().guests.filter((g) => g.eventId === eventId);
+  return readDb()
+    .guests.filter((g) => g.eventId === eventId)
+    .map(normalizeGuest);
 }
 
 export function getGuestByToken(token: string): Guest | undefined {
-  return readDb().guests.find((g) => g.token === token);
+  const guest = readDb().guests.find((g) => g.token === token);
+  return guest ? normalizeGuest(guest) : undefined;
 }
 
 export function upsertGuest(guest: Guest): Guest {
   const db = readDb();
-  const idx = db.guests.findIndex((g) => g.id === guest.id);
-  if (idx >= 0) db.guests[idx] = guest;
-  else db.guests.push(guest);
+  const next = normalizeGuest(guest);
+  const idx = db.guests.findIndex((g) => g.id === next.id);
+  if (idx >= 0) db.guests[idx] = next;
+  else db.guests.push(next);
   writeDb(db);
-  return guest;
+  return next;
+}
+
+function normalizeGuest(guest: Guest): Guest {
+  return {
+    ...guest,
+    songSuggestion: guest.songSuggestion ?? "",
+    dietary: guest.dietary ?? "",
+    message: guest.message ?? "",
+  };
 }
 
 export function listPayments(eventId: string): Payment[] {
